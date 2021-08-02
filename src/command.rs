@@ -88,11 +88,15 @@ impl Command for ReadRxPayload {
 
 pub struct WriteTxPayload<'a> {
     data: &'a [u8],
+    ack_payload_pipe: Option<u8>,
 }
 
 impl<'a> WriteTxPayload<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        WriteTxPayload { data }
+    pub fn new(data: &'a [u8], ack_payload_pipe: Option<u8>) -> Self {
+        WriteTxPayload {
+            data,
+            ack_payload_pipe,
+        }
     }
 }
 
@@ -100,9 +104,11 @@ impl<'a> Command for WriteTxPayload<'a> {
     fn len(&self) -> usize {
         1 + self.data.len()
     }
-
     fn encode(&self, buf: &mut [u8]) {
-        buf[0] = 0b1010_0000;
+        buf[0] = match self.ack_payload_pipe {
+            None => 0b1010_0000,
+            Some(x) => 0b1010_1000 | x,
+        };
         buf[1..].copy_from_slice(self.data);
     }
 

@@ -116,18 +116,19 @@ pub trait Configuration {
         &mut self,
         mode: CrcMode,
     ) -> Result<(), <<Self as Configuration>::Inner as Device>::Error> {
-        self.device().update_config(|config| mode.set_config(config))
+        self.device()
+            .update_config(|config| mode.set_config(config))
     }
 
     /// Sets the interrupt mask
-    /// 
+    ///
     /// When an interrupt mask is set to true, the interrupt is masked and will not fire on the IRQ pin.
     /// When set to false, it will trigger the IRQ pin.
     fn set_interrupt_mask(
         &mut self,
         data_ready_rx: bool,
         data_sent_tx: bool,
-        max_retransmits_tx: bool
+        max_retransmits_tx: bool,
     ) -> Result<(), <<Self as Configuration>::Inner as Device>::Error> {
         self.device().update_config(|config| {
             config.set_mask_rx_dr(data_ready_rx);
@@ -231,9 +232,10 @@ pub trait Configuration {
     }
 
     /// Set address width configuration
-    fn set_address_width(&mut self, width: u8)
-        -> Result<(), <<Self as Configuration>::Inner as Device>::Error> {
-
+    fn set_address_width(
+        &mut self,
+        width: u8,
+    ) -> Result<(), <<Self as Configuration>::Inner as Device>::Error> {
         let register = SetupAw(width - 2);
         self.device().write_register(register)?;
         Ok(())
@@ -268,6 +270,8 @@ pub trait Configuration {
     fn set_pipes_rx_lengths(
         &mut self,
         lengths: &[Option<u8>; PIPES_COUNT],
+        // TODO: API?
+        ack_payload: bool,
     ) -> Result<(), <<Self as Configuration>::Inner as Device>::Error> {
         // Enable dynamic payload lengths
         let mut bools = [true; PIPES_COUNT];
@@ -278,6 +282,9 @@ pub trait Configuration {
         if dynpd.0 != 0 {
             self.device().update_register::<Feature, _, _>(|feature| {
                 feature.set_en_dpl(true);
+                if ack_payload {
+                    feature.set_en_ack_pay(true);
+                }
             })?;
         }
         self.device().write_register(dynpd)?;

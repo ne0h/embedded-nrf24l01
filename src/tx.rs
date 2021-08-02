@@ -1,4 +1,4 @@
-use crate::command::{FlushTx, WriteTxPayload};
+use crate::command::{FlushTx, ReadRxPayload, ReadRxPayloadWidth, WriteTxPayload};
 use crate::config::Configuration;
 use crate::device::Device;
 use crate::registers::{FifoStatus, ObserveTx, Status};
@@ -18,6 +18,7 @@ use core::fmt;
 /// warranty could get void.
 pub struct TxMode<D: Device> {
     device: D,
+    ack_payload_pipe: Option<u8>,
 }
 
 impl<D: Device> fmt::Debug for TxMode<D> {
@@ -30,7 +31,10 @@ impl<D: Device> TxMode<D> {
     /// Relies on everything being set up by `StandbyMode::tx()`, from
     /// which it is called
     pub(crate) fn new(device: D) -> Self {
-        TxMode { device }
+        TxMode {
+            device,
+            ack_payload_pipe: None,
+        }
     }
 
     /// Disable `CE` so that you can switch into RX mode.
@@ -59,8 +63,10 @@ impl<D: Device> TxMode<D> {
     }
 
     /// Send asynchronously
-    pub fn send(&mut self, packet: &[u8]) -> Result<(), D::Error> {
-        self.device.send_command(&WriteTxPayload::new(packet))?;
+    pub fn send(&mut self, packet: &[u8], ack_payload_pipe: Option<u8>) -> Result<(), D::Error> {
+        self.ack_payload_pipe = ack_payload_pipe;
+        self.device
+            .send_command(&WriteTxPayload::new(packet, self.ack_payload_pipe))?;
         self.device.ce_enable();
         Ok(())
     }
@@ -70,7 +76,10 @@ impl<D: Device> TxMode<D> {
     ///
     /// This function behaves like `wait_empty()`, except that it returns whether sending was
     /// successful and that it provides an asynchronous interface.
-    pub fn poll_send(&mut self) -> nb::Result<bool, D::Error> {
+    pub fn poll_send(
+        &mut self,
+        ack_payload: &mut heapless::Vec<u8, 32>,
+    ) -> nb::Result<bool, D::Error> {
         let (status, fifo_status) = self.device.read_register::<FifoStatus>()?;
         // We need to clear all the TX interrupts whenever we return Ok here so that the next call
         // to poll_send correctly recognizes max_rt and send completion.
@@ -81,6 +90,16 @@ impl<D: Device> TxMode<D> {
             self.clear_interrupts_and_ce()?;
             Ok(false)
         } else if fifo_status.tx_empty() {
+            match self.ack_payload_pipe {
+                Some(_) => {
+                    let (_, payload_width) = self.device.send_command(&ReadRxPayloadWidth)?;
+                    let (_, payload) = self
+                        .device
+                        .send_command(&ReadRxPayload::new(payload_width as usize))?;
+                    ack_payload.extend_from_slice(payload.as_ref()).unwrap();
+                }
+                _ => {}
+            }
             self.clear_interrupts_and_ce()?;
             Ok(true)
         } else {
