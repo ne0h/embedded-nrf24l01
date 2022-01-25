@@ -1,4 +1,4 @@
-use crate::command::{ReadRxPayload, ReadRxPayloadWidth};
+use crate::command::{ReadRxPayload, ReadRxPayloadWidth, WriteTxPayload};
 use crate::config::Configuration;
 use crate::device::Device;
 use crate::payload::Payload;
@@ -9,6 +9,7 @@ use core::fmt;
 /// Represents **RX Mode**
 pub struct RxMode<D: Device> {
     device: D,
+    ack_payload_pipe: Option<u8>,
 }
 
 impl<D: Device> fmt::Debug for RxMode<D> {
@@ -21,7 +22,10 @@ impl<D: Device> RxMode<D> {
     /// Relies on everything being set up by `StandbyMode::rx()`, from
     /// which it is called
     pub(crate) fn new(device: D) -> Self {
-        RxMode { device }
+        RxMode {
+            device,
+            ack_payload_pipe: None,
+        }
     }
 
     /// Disable `CE` so that you can switch into TX mode.
@@ -88,6 +92,15 @@ impl<D: Device> RxMode<D> {
             .device
             .send_command(&ReadRxPayload::new(payload_width as usize))?;
         Ok(payload)
+    }
+
+    /// Send asynchronously
+    pub fn send(&mut self, packet: &[u8], ack_payload_pipe: Option<u8>) -> Result<(), D::Error> {
+        self.ack_payload_pipe = ack_payload_pipe;
+        self.device
+            .send_command(&WriteTxPayload::new(packet, self.ack_payload_pipe))?;
+        self.device.ce_enable();
+        Ok(())
     }
 }
 
